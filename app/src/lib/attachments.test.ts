@@ -15,6 +15,7 @@ import {
   imageMarkerCost,
   isAllowedMimeType,
   isVideoMimeType,
+  parseAttachmentReferences,
   parseMessageImages,
   validateAndReadFile,
   videoFrameExtractor,
@@ -470,6 +471,43 @@ describe('buildMessageWithAttachments', () => {
 });
 
 describe('parseMessageImages', () => {
+  const reference = `[ATTACHMENT:${encodeURIComponent(
+    JSON.stringify({
+      path: 'uploads/source.py',
+      name: 'source.py',
+      mime: 'text/plain',
+      size_bytes: 10,
+    })
+  )}]`;
+  const markers = [
+    '',
+    '[IMAGE:data:image/png;base64,abc]',
+    '[FILE:data:text/plain;base64,abc]',
+    reference,
+  ];
+
+  it.each(markers)('preserves code indentation and Markdown spacing with marker %s', marker => {
+    const content = [
+      'Review this  example:',
+      '```python',
+      'if ready:',
+      '    for item in items:',
+      '        print(item)',
+      '```',
+      'first line  ',
+      'second line',
+    ].join('\n');
+
+    expect(parseMessageImages(`${content}${marker ? ` ${marker}` : ''}`).text).toBe(content);
+  });
+
+  it.each(markers.slice(1))('only removes redundant separators beside marker %s', marker => {
+    expect(parseMessageImages(`before ${marker} after`).text).toBe('before after');
+    expect(parseMessageImages(`before${marker} after`).text).toBe('before after');
+    expect(parseMessageImages(`before ${marker}after`).text).toBe('before after');
+    expect(parseMessageImages(`before${marker}after`).text).toBe('beforeafter');
+  });
+
   it('returns empty dataUris and original text when no markers', () => {
     const result = parseMessageImages('hello world');
     expect(result.text).toBe('hello world');
@@ -529,6 +567,18 @@ describe('parseMessageImages', () => {
     );
     expect(result.text).toBe('first paragraph\n\n\n\nsecond paragraph');
     expect(result.text).toContain('\n\n');
+  });
+});
+
+describe('parseAttachmentReferences', () => {
+  it.each([
+    '[ATTACHMENT:%invalid]',
+    `[ATTACHMENT:${encodeURIComponent(
+      JSON.stringify({ path: '../escape', name: 'file', mime: 'text/plain', size_bytes: 1 })
+    )}]`,
+  ])('preserves whitespace around invalid references: %s', marker => {
+    const content = `before  ${marker}  after\n    indented`;
+    expect(parseAttachmentReferences(content)).toEqual({ text: content, attachments: [] });
   });
 });
 

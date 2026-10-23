@@ -335,38 +335,40 @@ export function parseAttachmentReferences(content: string): {
 } {
   const attachments: AttachmentReference[] = [];
   const text = content
-    .replace(/\[ATTACHMENT:([^\]]+)\]/g, (marker, encoded: string) => {
-      try {
-        const decoded = new URLSearchParams(`value=${encoded}`).get('value');
-        const value: unknown = JSON.parse(decoded ?? '');
-        if (!value || typeof value !== 'object') return marker;
-        const file = value as Partial<AttachmentReference>;
-        if (
-          typeof file.path !== 'string' ||
-          typeof file.name !== 'string' ||
-          typeof file.mime !== 'string' ||
-          typeof file.size_bytes !== 'number' ||
-          !Number.isSafeInteger(file.size_bytes) ||
-          file.size_bytes < 0
-        )
+    .replace(
+      /\[ATTACHMENT:([^\]]+)\]( ?)/g,
+      (marker, encoded: string, space: string, offset: number) => {
+        try {
+          const decoded = new URLSearchParams(`value=${encoded}`).get('value');
+          const value: unknown = JSON.parse(decoded ?? '');
+          if (!value || typeof value !== 'object') return marker;
+          const file = value as Partial<AttachmentReference>;
+          if (
+            typeof file.path !== 'string' ||
+            typeof file.name !== 'string' ||
+            typeof file.mime !== 'string' ||
+            typeof file.size_bytes !== 'number' ||
+            !Number.isSafeInteger(file.size_bytes) ||
+            file.size_bytes < 0
+          )
+            return marker;
+          // These are workspace references, never URLs or absolute browser targets.
+          const components = file.path.split('/');
+          if (
+            !file.path ||
+            file.path.includes('\\') ||
+            file.path.includes(':') ||
+            file.path.includes('\0') ||
+            components.some(part => part === '' || part === '.' || part === '..')
+          )
+            return marker;
+          attachments.push(file as AttachmentReference);
+          return content[offset - 1] === ' ' ? '' : space;
+        } catch {
           return marker;
-        // These are workspace references, never URLs or absolute browser targets.
-        const components = file.path.split('/');
-        if (
-          !file.path ||
-          file.path.includes('\\') ||
-          file.path.includes(':') ||
-          file.path.includes('\0') ||
-          components.some(part => part === '' || part === '.' || part === '..')
-        )
-          return marker;
-        attachments.push(file as AttachmentReference);
-        return '';
-      } catch {
-        return marker;
+        }
       }
-    })
-    .replace(/ {2,}/g, ' ')
+    )
     .trim();
   return { text, attachments };
 }
@@ -391,15 +393,20 @@ export function attachmentMetadata(attachments: Attachment[]): Record<string, un
 export function parseMessageImages(content: string): { text: string; dataUris: string[] } {
   const dataUris: string[] = [];
   const text = parseAttachmentReferences(content)
-    .text.replace(/\[IMAGE:([^\]]+)\]/g, (_match, uri: string) => {
-      dataUris.push(uri);
-      return '';
-    })
-    .replace(/\[FILE:([^\]]+)\]/g, '') // Strip file markers
-    // Collapse only runs of plain spaces (not \s) left behind by marker
-    // removal — using \s here would also eat intentional newlines/paragraph
-    // breaks in the user's own text.
-    .replace(/ {2,}/g, ' ')
+    // Remove at most one redundant separator beside a marker. Collapsing
+    // spaces throughout the message would destroy code indentation and Markdown.
+    .text.replace(
+      /\[IMAGE:([^\]]+)\]( ?)/g,
+      (_match, uri: string, space: string, offset: number, source: string) => {
+        dataUris.push(uri);
+        return source[offset - 1] === ' ' ? '' : space;
+      }
+    )
+    .replace(
+      /\[FILE:([^\]]+)\]( ?)/g,
+      (_match, _uri: string, space: string, offset: number, source: string) =>
+        source[offset - 1] === ' ' ? '' : space
+    )
     .trim();
   return { text, dataUris };
 }
