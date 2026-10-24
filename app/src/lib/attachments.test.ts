@@ -508,6 +508,30 @@ describe('parseMessageImages', () => {
     expect(parseMessageImages(`before${marker}after`).text).toBe('beforeafter');
   });
 
+  it.each(markers.slice(1).flatMap(first => markers.slice(1).map(second => [first, second])))(
+    'handles adjacent markers %s and %s as one separator boundary',
+    (first, second) => {
+      const adjacent = `${first}${second}`;
+      expect(parseMessageImages(`before ${adjacent} after`).text).toBe('before after');
+      expect(parseMessageImages(`before${adjacent} after`).text).toBe('before after');
+      expect(parseMessageImages(`before ${adjacent}after`).text).toBe('before after');
+      expect(parseMessageImages(`before${adjacent}after`).text).toBe('beforeafter');
+      expect(parseMessageImages(`before  ${adjacent}  after`).text).toBe('before   after');
+      expect(parseMessageImages(`before\n${adjacent}\n    after`).text).toBe('before\n\n    after');
+      expect(parseMessageImages(`before ${first} ${second} after`).text).toBe('before after');
+      expect(parseMessageImages(`before ${adjacent} middle ${adjacent} after`).text).toBe(
+        'before middle after'
+      );
+    }
+  );
+
+  it('keeps image order when stripping an adjacent marker run', () => {
+    expect(parseMessageImages('before [IMAGE:a][IMAGE:b][IMAGE:c] after')).toEqual({
+      text: 'before after',
+      dataUris: ['a', 'b', 'c'],
+    });
+  });
+
   it('returns empty dataUris and original text when no markers', () => {
     const result = parseMessageImages('hello world');
     expect(result.text).toBe('hello world');
@@ -573,12 +597,24 @@ describe('parseMessageImages', () => {
 describe('parseAttachmentReferences', () => {
   it.each([
     '[ATTACHMENT:%invalid]',
+    '[ATTACHMENT:null]',
+    '[ATTACHMENT:%7B%7D]',
     `[ATTACHMENT:${encodeURIComponent(
       JSON.stringify({ path: '../escape', name: 'file', mime: 'text/plain', size_bytes: 1 })
     )}]`,
   ])('preserves whitespace around invalid references: %s', marker => {
     const content = `before  ${marker}  after\n    indented`;
     expect(parseAttachmentReferences(content)).toEqual({ text: content, attachments: [] });
+  });
+
+  it('preserves invalid references between adjacent valid references', () => {
+    const reference = { path: 'uploads/a.txt', name: 'a.txt', mime: 'text/plain', size_bytes: 1 };
+    const valid = `[ATTACHMENT:${encodeURIComponent(JSON.stringify(reference))}]`;
+    const invalid = '[ATTACHMENT:%invalid]';
+    expect(parseAttachmentReferences(`before  ${valid}${invalid}${valid}  after`)).toEqual({
+      text: `before  ${invalid}  after`,
+      attachments: [reference, reference],
+    });
   });
 });
 
