@@ -3,8 +3,10 @@
 The cron domain exposes the `cron.*` RPC controllers and agent tools that
 create and manage scheduled jobs. The core service drives scheduler dispatch,
 publishes health transitions, and supplies the host job handlers and delivery
-callbacks. Agents reach it through the `cron` and `schedule` tools, and the
-desktop UI through the `cron` RPC namespace.
+callbacks. Agents reach it through the `scheduling` pack's per-operation
+tools (`cron_add`, `cron_list`, `cron_update`, `cron_remove`, `cron_run`,
+`cron_runs`; the collapsed `cron` stays registered, deferred) and the
+`schedule` tool, and the desktop UI through the `cron` RPC namespace.
 
 Scheduling itself is not in core. The `tinyflows` loadable module owns the
 scheduler runtime (poll pass, process-wide run claims, retry with backoff,
@@ -170,8 +172,8 @@ alerts tab and run history.
 | Mode | What happens |
 | --- | --- |
 | `none` | Silent. Output lives in the job's `last_output` only. This is `DeliveryConfig::default()`. |
-| `proactive` | Publishes `ProactiveMessageRequested`. `channels::proactive::ProactiveMessageSubscriber` pushes to the in-app web stream and mirrors to `channels_config.active_channel` when set. Used for briefings and other desktop-first output. |
-| `announce` | Requires `channel` and `to`. Sends synchronously through `cron::channel_bridge::send_to_channel`; the run records `Delivered` only after the channel accepts the message, otherwise `Failed`. The `cron_add` tool checks `to` against the channel's `allowed_users`. |
+| `proactive` | Publishes `ProactiveMessageRequested` with the originating tenant. `web_chat::proactive::WebProactiveSubscriber` publishes to that tenant's in-app web stream; when configured, `channels::proactive::ProactiveMessageSubscriber` also sends to `channels_config.active_channel`. Used for briefings and other user-facing proactive output. |
+| `announce` | Requires `channel` and `to`. Sends synchronously through `cron::channel_bridge::announce_to_channel` (the provider's single configured account in the TinyChannels module); the run records `Delivered` only after the channel confirms the message, otherwise `Failed`. The `cron_add` tool checks `to` against the channel's `allowed_users`. |
 | `origin` | Sends the reply back into the conversation that created the job ([`scheduler/origin_delivery.rs`](./scheduler/origin_delivery.rs)). Requires `CronJob.origin`. |
 
 A run that has nothing to send is recorded as `Suppressed` in every delivering
@@ -390,8 +392,9 @@ Cron publishes, through [`core/bus.rs`](../core/bus.rs), these `DomainEvent` var
   (output truncated to 512 characters). The completion event carries its
   optional tenant so notification subscribers keep the original profile and
   agent scope after a one-shot job is removed.
-- `ProactiveMessageRequested` (`proactive` delivery), consumed by
-  `channels::proactive`.
+- `ProactiveMessageRequested` (`proactive` delivery), consumed by the
+  always-registered `web_chat::proactive` subscriber and, when the channels
+  runtime is enabled, `channels::proactive` for external delivery.
 - `CronSystemJobDue`, consumed by `memory::bus`.
 
 ## Who calls in
