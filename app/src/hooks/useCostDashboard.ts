@@ -140,23 +140,26 @@ export function useCostDashboard(options: UseCostDashboardOptions = {}): UseCost
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const cancelledRef = useRef<boolean>(false);
 
+  const requestRef = useRef(0);
+
   const fetchOnce = useCallback(async () => {
+    const request = ++requestRef.current;
     setIsFetching(true);
     try {
       const response = await callCoreRpc<RpcEnvelope<CostDashboardPayload> | CostDashboardPayload>({
         method: 'openhuman.cost_get_dashboard',
         params: {},
       });
-      if (cancelledRef.current) return;
+      if (cancelledRef.current || request !== requestRef.current) return;
       const payload = unwrapRpcPayload(response);
       setData(payload);
       setError(null);
       setLastUpdated(Date.now());
     } catch (err) {
-      if (cancelledRef.current) return;
+      if (cancelledRef.current || request !== requestRef.current) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      if (!cancelledRef.current) {
+      if (!cancelledRef.current && request === requestRef.current) {
         setIsLoading(false);
         setIsFetching(false);
       }
@@ -178,6 +181,7 @@ export function useCostDashboard(options: UseCostDashboardOptions = {}): UseCost
     if (paused) {
       return () => {
         cancelledRef.current = true;
+        requestRef.current++;
       };
     }
     const interval = window.setInterval(
@@ -188,6 +192,7 @@ export function useCostDashboard(options: UseCostDashboardOptions = {}): UseCost
     );
     return () => {
       cancelledRef.current = true;
+      requestRef.current++;
       window.clearInterval(interval);
     };
   }, [fetchOnce, refreshMs, paused]);

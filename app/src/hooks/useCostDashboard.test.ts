@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { callCoreRpc } from '../services/coreRpcClient';
@@ -40,6 +40,54 @@ describe('useCostDashboard', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('keeps the newest refresh when an earlier dashboard request finishes later', async () => {
+    let resolvePrevious!: (value: CostDashboardPayload) => void;
+    mockedCall
+      .mockImplementationOnce(
+        () =>
+          new Promise<CostDashboardPayload>(resolve => {
+            resolvePrevious = resolve;
+          })
+      )
+      .mockResolvedValueOnce({ ...fixture, period_total_usd: 20 });
+    const { result } = renderHook(() => useCostDashboard({ paused: true }));
+
+    await act(async () => {
+      await result.current.refetch();
+    });
+    expect(result.current.data?.period_total_usd).toBe(20);
+    await act(async () => {
+      resolvePrevious({ ...fixture, period_total_usd: 10 });
+    });
+
+    expect(result.current.data?.period_total_usd).toBe(20);
+    expect(result.current.error).toBeNull();
+  });
+
+  it('ignores an earlier request failure after a newer refresh succeeds', async () => {
+    let rejectPrevious!: (error: Error) => void;
+    mockedCall
+      .mockImplementationOnce(
+        () =>
+          new Promise<CostDashboardPayload>((_resolve, reject) => {
+            rejectPrevious = reject;
+          })
+      )
+      .mockResolvedValueOnce(fixture);
+    const { result } = renderHook(() => useCostDashboard({ paused: true }));
+
+    await act(async () => {
+      await result.current.refetch();
+    });
+    await act(async () => {
+      rejectPrevious(new Error('Stale request failed'));
+    });
+
+    expect(result.current.data).toEqual(fixture);
+    expect(result.current.error).toBeNull();
+    expect(result.current.isFetching).toBe(false);
   });
 
   it('calls openhuman.cost_get_dashboard and surfaces the payload', async () => {
