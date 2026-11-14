@@ -173,6 +173,27 @@ describe('startLoopbackOauthListener', () => {
     }
   });
 
+  test('starting a new attempt clears the previous callback timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      mockInvoke.mockResolvedValue({ redirectUri: 'http://127.0.0.1:53824/auth', state: 's' });
+      mockListen.mockResolvedValue(vi.fn());
+      const previous = await startLoopbackOauthListener({ timeoutSecs: 1 });
+      void previous!.awaitCallback().catch(() => {});
+      await Promise.resolve();
+
+      const current = await startLoopbackOauthListener({ timeoutSecs: 5 });
+      mockInvoke.mockClear();
+      vi.advanceTimersByTime(1000);
+      await Promise.resolve();
+
+      expect(mockInvoke).not.toHaveBeenCalledWith('stop_loopback_oauth_listener');
+      await current!.cancel();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test('cancel clears the pending timeout so it cannot stop a later listener', async () => {
     vi.useFakeTimers();
     try {

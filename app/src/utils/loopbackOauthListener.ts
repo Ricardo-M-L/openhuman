@@ -58,12 +58,10 @@ export interface StartLoopbackOptions {
 }
 
 /**
- * The JS-side `listen()` handler from a previous call. We unsubscribe it
- * before starting a new listener so a single Rust emit can't fan out to
- * multiple stale handlers (happens when the user re-clicks before the
- * previous OAuth round-trip completes).
+ * Clean up the previous attempt before starting a new listener, including
+ * its callback timeout so it cannot stop a newer listener after a retry.
  */
-let activeUnlisten: UnlistenFn | null = null;
+let activeTeardown: (() => void) | null = null;
 
 /**
  * Start a one-shot loopback listener. Returns `null` if not running inside
@@ -73,9 +71,9 @@ let activeUnlisten: UnlistenFn | null = null;
 export const startLoopbackOauthListener = async (
   options: StartLoopbackOptions = {}
 ): Promise<LoopbackHandle | null> => {
-  if (activeUnlisten) {
-    const prev = activeUnlisten;
-    activeUnlisten = null;
+  if (activeTeardown) {
+    const prev = activeTeardown;
+    activeTeardown = null;
     prev();
   }
   if (!isTauri()) {
@@ -112,12 +110,13 @@ export const startLoopbackOauthListener = async (
   const teardown = () => {
     done = true;
     window.clearTimeout(timer);
+    if (activeTeardown === teardown) activeTeardown = null;
     if (unlisten) {
       unlisten();
-      if (activeUnlisten === unlisten) activeUnlisten = null;
       unlisten = null;
     }
   };
+  activeTeardown = teardown;
 
   const awaitCallback = (): Promise<string> =>
     new Promise<string>((resolve, reject) => {
@@ -138,7 +137,6 @@ export const startLoopbackOauthListener = async (
             return;
           }
           unlisten = fn;
-          activeUnlisten = fn;
         })
         .catch(err => {
           if (done) return;
